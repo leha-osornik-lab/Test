@@ -1,0 +1,1502 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>PvZ: Network Multiplayer</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#1a1a2e; font-family:Arial,sans-serif; display:flex;
+         justify-content:center; align-items:center; min-height:100vh; color:white; overflow:hidden; }
+  #game { background:#2d5016; border:4px solid #1a1a2e; border-radius:10px;
+          box-shadow:0 0 40px rgba(0,0,0,0.8); position:relative; }
+  canvas { display:block; border-radius:6px; cursor:pointer; }
+  #menu { position:absolute; inset:0; background:rgba(10,10,25,0.98);
+          display:flex; flex-direction:column; justify-content:center; align-items:center;
+          border-radius:6px; z-index:10; padding:20px; overflow-y:auto; }
+  #menu h1 { font-size:34px; color:#7fff00; text-shadow:0 0 20px #7fff00, 3px 3px 0 #000;
+             margin-bottom:8px; text-align:center; }
+  #menu h2 { color:#ffd700; margin-bottom:14px; font-size:16px; }
+  #menu p { color:#aaa; margin-bottom:12px; font-size:13px; text-align:center; max-width:600px; line-height:1.5; }
+  .menu-section { background:rgba(255,255,255,0.05); border-radius:10px; padding:14px; margin:8px 0; width:400px; }
+  .menu-section h3 { color:#ffeb3b; font-size:15px; margin-bottom:10px; text-align:center; }
+  .diff-btn { padding:9px 30px; margin:3px; font-size:14px; font-weight:bold;
+              border:none; border-radius:8px; cursor:pointer; transition:0.2s;
+              width:100%; color:white; text-shadow:1px 1px 2px #000; }
+  .diff-btn:hover { transform:scale(1.02); filter:brightness(1.2); }
+  .diff-1{background:#4caf50}.diff-2{background:#8bc34a}.diff-3{background:#ff9800}
+  .diff-4{background:#f44336}.diff-5{background:#9c27b0}
+  .host-btn{background:linear-gradient(90deg,#4caf50,#2e7d32);padding:14px;font-size:16px}
+  .join-btn{background:linear-gradient(90deg,#2196f3,#1565c0);padding:14px;font-size:16px}
+  .back-btn{background:#555;padding:8px;font-size:13px;margin-top:8px}
+  input[type=text] { width:100%; padding:12px; font-size:18px; text-align:center;
+                     border:2px solid #7fff00; border-radius:8px; background:#111;
+                     color:#7fff00; font-family:monospace; margin-bottom:8px; letter-spacing:2px; }
+  input[type=text]:focus { outline:none; border-color:#ffeb3b; box-shadow:0 0 10px #ffeb3b; }
+  .room-id-box { background:#000; color:#7fff00; padding:16px; border-radius:8px;
+                 font-family:monospace; font-size:22px; letter-spacing:3px;
+                 border:2px solid #7fff00; margin:10px 0; text-align:center;
+                 text-shadow:0 0 10px #7fff00; cursor:pointer; }
+  .status { color:#ffeb3b; font-size:14px; margin-top:10px; text-align:center; font-weight:bold; }
+  .hidden { display:none !important; }
+  .copy-btn { background:#ffd700; color:#000; padding:8px 20px; border:none;
+              border-radius:6px; font-weight:bold; cursor:pointer; margin-top:6px; }
+  .copy-btn:hover { background:#ffeb3b; }
+</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="cv" width="1400" height="900"></canvas>
+  <div id="menu">
+    <!-- Main menu -->
+    <div id="screen-main">
+      <h1>🌐 PvZ: NETWORK MULTIPLAYER 🧟</h1>
+      <h2>Играйте с другом через интернет!</h2>
+      <p>⚠️ Откройте файл через HTTP-сервер (не file://).<br>
+         Оба игрока должны быть онлайн. WebRTC работает через PeerJS.</p>
+      <div class="menu-section">
+        <h3>🌐 Создать игру (Хост · P1 · верхние ряды)</h3>
+        <button class="diff-btn diff-1" onclick="hostGame(1)">🌱 Легко</button>
+        <button class="diff-btn diff-2" onclick="hostGame(2)">🌿 Нормально</button>
+        <button class="diff-btn diff-3" onclick="hostGame(3)">🍊 Сложно</button>
+        <button class="diff-btn diff-4" onclick="hostGame(4)">🔥 Очень сложно</button>
+        <button class="diff-btn diff-5" onclick="hostGame(5)">💀 Хардкор</button>
+      </div>
+      <div class="menu-section">
+        <h3>🔗 Присоединиться (P2 · нижние ряды)</h3>
+        <input type="text" id="join-id" placeholder="pvz-XXXXXX" maxlength="10">
+        <button class="diff-btn join-btn" onclick="joinGame()">🔵 Подключиться</button>
+      </div>
+    </div>
+
+    <!-- Waiting for connection -->
+    <div id="screen-waiting" class="hidden">
+      <h1>⏳ Ожидание друга...</h1>
+      <p>Отправь этот ID другу:</p>
+      <div class="room-id-box" id="room-id-display" onclick="copyRoomId()">pvz-</div>
+      <button class="copy-btn" onclick="copyRoomId()">📋 Скопировать ID</button>
+      <div class="status" id="waiting-status">Создание комнаты...</div>
+      <button class="diff-btn back-btn" onclick="backToMenu()">← Назад</button>
+    </div>
+
+    <!-- Connecting -->
+    <div id="screen-connecting" class="hidden">
+      <h1>🔗 Подключение...</h1>
+      <div class="status" id="connecting-status">Подключаемся к комнате...</div>
+      <button class="diff-btn back-btn" onclick="backToMenu()">← Отмена</button>
+    </div>
+
+    <!-- Game over -->
+    <div id="screen-gameover" class="hidden">
+      <h1>💀 ЗОМБИ СЪЕЛИ МОЗГИ!</h1>
+      <p id="gameover-stats"></p>
+      <button class="diff-btn host-btn" onclick="backToMenu()">🏠 В главное меню</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.0/dist/peerjs.min.js"></script>
+<script>
+if (typeof Peer === 'undefined') {
+  alert('⚠️ PeerJS не загрузился!\nПроверь интернет-соединение и перезагрузи.');
+}
+
+// ==================== CONSTANTS ====================
+const canvas = document.getElementById('cv');
+const ctx = canvas.getContext('2d');
+const W = 1400, H = 900;
+const COLS = 9, ROWS = 6, CW = 100, CH = 100;
+const GX = 250, GY = 150;
+const SUN_VALUE = 25;
+const PREP_TIME = 20000;
+const FINAL_BOSS_WAVE = 40;
+const SNAPSHOT_INTERVAL = 50;
+
+const P = (name,cost,hp,color,icon,ability,o={}) =>
+  ({name,cost,hp,color,icon,ability,cooldown:5000,...o});
+const Z = (name,hp,speed,damage,color,icon,o={}) =>
+  ({name,hp,speed,damage,color,icon,tier:1,helmet:null,...o});
+
+const PLANTS = {
+  sunflower:P('Подсолнух',50,100,'#ffd700','🌻','sun',{cd:5000}),
+  peashooter:P('Горохострел',100,100,'#4caf50','🌱','shoot',{cd:5000,damage:20,rate:1400}),
+  wallnut:P('Стенорех',50,500,'#8d6e63','🥜','none',{cd:15000}),
+  snowpea:P('Снегогорох',175,100,'#81d4fa','❄️','shoot',{cd:8000,damage:20,rate:1400,slow:true}),
+  repeater:P('Двойной горох',200,100,'#2e7d32','🌿','shoot',{cd:7000,damage:20,rate:1400,double:true}),
+  cherrybomb:P('Вишнёвая бомба',150,100,'#e53935','🍒','bomb',{cd:20000,damage:1800}),
+  chomper:P('Жеватель',150,100,'#ab47bc','👄','chomp',{cd:10000,damage:500}),
+  torchwood:P('Древопламя',175,100,'#ff6f00','🔥','boost',{cd:12000}),
+  threeshooter:P('Трёхстрел',325,100,'#00897b','🍀','shoot',{cd:12000,damage:20,rate:1400,triple:true}),
+  spikeweed:P('Шиповник',100,100,'#795548','🌾','thorns',{cd:8000,thorns:40}),
+  gatling:P('Гатлинг',250,100,'#1b5e20','🔫','shoot',{cd:10000,damage:20,rate:400}),
+  melonpult:P('Дынная катапульта',300,100,'#8bc34a','🍈','shoot',{cd:10000,damage:60,rate:2500,splash:true}),
+  wintermelon:P('Зимняя дыня',500,100,'#b3e5fc','🍉','shoot',{cd:12000,damage:60,rate:2500,splash:true,slow:true}),
+  jalapeno:P('Халапеньо',125,100,'#f44336','🌶️','line',{cd:18000,damage:1800}),
+  doom:P('Дум-гриб',200,100,'#4a148c','💀','bomb',{cd:25000,damage:3000,radius:2}),
+  tallnut:P('Высокий орех',125,1000,'#8d6e63','🥜','none',{cd:20000}),
+  sunshroom:P('Гриб-солнце',25,80,'#ffccbc','🍄','sun',{cd:4000}),
+  twinsun:P('Двойной подсолнух',150,100,'#ffb300','🌼','sun',{cd:8000}),
+  cactus:P('Кактус',125,100,'#66bb6a','🌵','shoot',{cd:6000,damage:25,rate:1400,pierce:true}),
+  starfruit:P('Звёздный фрукт',125,100,'#ffc107','⭐','shoot',{cd:8000,damage:20,rate:1800,fiveway:true}),
+  powerlily:P('Сияющая лилия',150,100,'#e1bee7','🌸','buff',{cd:15000,buffAmount:1.5}),
+  healplant:P('Целитель',125,100,'#c8e6c9','💚','heal',{cd:10000,healAmount:100}),
+  iceberg:P('Айсберг-салат',50,100,'#b3e5fc','🧊','freeze1',{cd:10000,stunTime:5000}),
+  fume:P('Дымогриб',75,100,'#b39ddb','💨','shoot',{cd:6000,damage:20,rate:1500,pierce:true,range:220}),
+  primalnut:P('Прайм-орех',75,400,'#795548','🥥','none',{cd:12000}),
+  spikerock:P('Каменный шиповник',250,100,'#616161','🪨','thorns',{cd:12000,thorns:80}),
+  magnet:P('Магнит',100,100,'#607d8b','🧲','magnet',{cd:15000}),
+  citron:P('Цитрон',350,100,'#aed581','🍋','shoot',{cd:10000,damage:200,rate:3500}),
+  lightning:P('Молния',200,100,'#ffeb3b','⚡','shoot',{cd:8000,damage:40,rate:1800,chain:true}),
+  blover:P('Клевер',100,100,'#aed581','🍀','push',{cd:8000,pushDist:300}),
+  explodeonut:P('Взрыво-орех',100,500,'#e65100','🥜','none',{cd:18000,explodeOnDeath:true,damage:1500}),
+  gatling2:P('Гатлинг II',500,150,'#0d3d0d','🔫','shoot',{cd:12000,damage:30,rate:300}),
+  dragon:P('Дракон',1500,500,'#d32f2f','🐲','shoot',{cd:25000,damage:300,rate:2000,fiveway:true,splash:true,range:300})
+};
+
+const DESC = {
+  sunflower:'Солнце каждые 7с', peashooter:'Стреляет (20)',
+  wallnut:'Стена 500HP', snowpea:'Замедляет (20)',
+  repeater:'2 горошины', cherrybomb:'Взрыв 3×3',
+  chomper:'Съедает зомби', torchwood:'x2 урон гороха',
+  threeshooter:'3 ряда', spikeweed:'Урон идущим (40)',
+  gatling:'Очень быстрый', melonpult:'Сплэш (60)',
+  wintermelon:'Сплэш+замедление', jalapeno:'Сжигает ряд',
+  doom:'Мега-бомба', tallnut:'Стена 1000HP',
+  sunshroom:'Дешёвое солнце', twinsun:'Быстрое солнце',
+  cactus:'Пробивает', starfruit:'5 направлений',
+  powerlily:'x1.5 соседям', healplant:'+100 HP',
+  iceberg:'Заморозка 5с', fume:'Пробитие (220)',
+  primalnut:'Дешёвый орех', spikerock:'Шип (80)',
+  magnet:'Снимает шлемы', citron:'Тяжёлый (200)',
+  lightning:'Цепная молния', blover:'Отбрасывает',
+  explodeonut:'Взрыв при смерти', gatling2:'Очень быстрый (30)',
+  dragon:'5-way + сплэш'
+};
+
+const ZOMBIES = {
+  basic:Z('Зомби',180,0.22,20,'#6d8b4a','🧟',{tier:1}),
+  cone:Z('Конус',370,0.22,20,'#8d6e63','🧟‍♂️',{tier:1,helmet:'cone'}),
+  flag:Z('Флаг',180,0.30,20,'#d32f2f','🚩',{tier:1}),
+  pole:Z('Шест',350,0.5,20,'#ff7043','🏃',{tier:1}),
+  news:Z('Газета',220,0.22,20,'#5d4037','📰',{tier:1}),
+  imp:Z('Бес',100,0.35,15,'#9e9e9e','👶',{tier:1,small:true}),
+  bucket:Z('Ведро',1100,0.20,25,'#9e9e9e','🧟',{tier:2,helmet:'bucket'}),
+  football:Z('Футболист',1400,0.32,30,'#1976d2','🏈',{tier:2,helmet:'helmet'}),
+  dancer:Z('Танцор',400,0.28,20,'#7b1fa2','💃',{tier:2,summoner:true}),
+  king:Z('Король',500,0.22,25,'#ffd700','👑',{tier:2,healer:true}),
+  splitter:Z('Разделитель',450,0.25,20,'#4caf50','🧟',{tier:2,splitter:true}),
+  exploder:Z('Взрывник',300,0.28,20,'#d32f2f','💣',{tier:2,exploder:true}),
+  shield:Z('Щитоносец',900,0.22,25,'#78909c','🛡️',{tier:2,shielded:true}),
+  tank:Z('Танк',800,0.15,30,'#546e7a','🛡️',{tier:2}),
+  gargantuar:Z('Гаргантюа',3000,0.14,100,'#424242','👹',{tier:3,huge:true}),
+  redgargan:Z('Красный Гаргантюа',4000,0.12,150,'#b71c1c','👺',{tier:3,huge:true}),
+  wizard:Z('Волшебник',1200,0.20,25,'#512da8','🧙',{tier:3,summoner:true}),
+  bomber:Z('Бомбер',800,0.26,30,'#b71c1c','💥',{tier:3,exploder:true}),
+  megatank:Z('Мега-танк',4000,0.12,50,'#455a64','🛡️',{tier:3}),
+  elite:Z('Элита',1800,0.22,30,'#6a1b9a','⭐',{tier:3}),
+  giant:Z('Гигант',4500,0.10,100,'#212121','👹',{tier:4,huge:true}),
+  zomboss:Z('Доктор Зомбосс',6000,0.10,150,'#8b0000','👑',{tier:5,huge:true,boss:true}),
+  fireboss:Z('Огненный БОСС',8500,0.10,180,'#ff5722','🔥',{tier:5,huge:true,boss:true,exploder:true}),
+  megaboss:Z('МЕГА-БОСС',10000,0.08,200,'#4a0000','💀',{tier:5,huge:true,boss:true}),
+  apocalypse:Z('💀 АПОКАЛИПСИС 💀',30000,0.06,300,'#0d0000','💀',{tier:6,huge:true,boss:true,trueBoss:true,summoner:true,healer:true,exploder:true,shielded:true})
+};
+
+const DIFFICULTIES = {
+  1:{name:'Легко',hpMul:0.7,speedMul:0.8,waveInterval:25000,spawnMul:0.7,startSun:150,sunRate:3000},
+  2:{name:'Нормально',hpMul:1.0,speedMul:1.0,waveInterval:22000,spawnMul:1.0,startSun:100,sunRate:2500},
+  3:{name:'Сложно',hpMul:1.3,speedMul:1.15,waveInterval:18000,spawnMul:1.3,startSun:75,sunRate:2200},
+  4:{name:'Очень сложно',hpMul:1.7,speedMul:1.3,waveInterval:15000,spawnMul:1.6,startSun:50,sunRate:2000},
+  5:{name:'Хардкор',hpMul:2.2,speedMul:1.5,waveInterval:12000,spawnMul:2.0,startSun:25,sunRate:1800}
+};
+
+const DEFAULT_DECK = ['sunflower','peashooter','wallnut','snowpea','repeater',
+  'cherrybomb','chomper','torchwood','threeshooter','spikeweed'];
+
+// ==================== STATE ====================
+let state = null;
+let peer = null;
+let conn = null;
+let isHost = false;
+let hostDifficulty = 2;
+let nextSunId = 1;
+let lastSnapshotSent = 0;
+let lastSnapshotRecv = 0;
+let networkMode = null; // 'host' | 'client' | null
+
+// ==================== NETWORK ====================
+function generateRoomId() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let id = 'pvz-';
+  for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)];
+  return id;
+}
+
+function showScreen(name) {
+  ['main','waiting','connecting','gameover'].forEach(s => {
+    document.getElementById('screen-' + s).classList.add('hidden');
+  });
+  if (name) document.getElementById('screen-' + name).classList.remove('hidden');
+  document.getElementById('menu').classList.toggle('hidden', name === null);
+}
+
+function hostGame(diff) {
+  if (typeof Peer === 'undefined') { alert('PeerJS не загружен'); return; }
+  hostDifficulty = diff;
+  isHost = true;
+  networkMode = 'host';
+  const roomId = generateRoomId();
+  state = createGame(diff);
+  state.mode = 'waiting';
+
+  showScreen('waiting');
+  document.getElementById('room-id-display').textContent = roomId;
+  document.getElementById('waiting-status').textContent = 'Создание комнаты...';
+
+  peer = new Peer(roomId, { debug: 0 });
+
+  peer.on('open', (id) => {
+    document.getElementById('waiting-status').textContent = '✅ Комната готова! Ждём друга...';
+    state.roomId = id;
+    gameLoop();
+  });
+
+  peer.on('connection', (c) => {
+    if (conn) { c.close(); return; }
+    conn = c;
+    conn.on('open', () => {
+      document.getElementById('waiting-status').textContent = '🎉 Друг подключился! Игра начинается...';
+      startNetworkGame();
+    });
+    conn.on('data', handleHostReceive);
+    conn.on('close', () => {
+      if (state && state.mode === 'play') showConnectionLost();
+    });
+    conn.on('error', () => {});
+  });
+
+  peer.on('error', (err) => {
+    document.getElementById('waiting-status').textContent = '❌ Ошибка: ' + err.type;
+  });
+}
+
+function joinGame() {
+  if (typeof Peer === 'undefined') { alert('PeerJS не загружен'); return; }
+  const roomId = document.getElementById('join-id').value.trim().toLowerCase();
+  if (!roomId || !roomId.startsWith('pvz-')) {
+    alert('Введите корректный ID (pvz-XXXXXX)');
+    return;
+  }
+  isHost = false;
+  networkMode = 'client';
+  showScreen('connecting');
+  document.getElementById('connecting-status').textContent = 'Подключаемся к ' + roomId + '...';
+
+  peer = new Peer({ debug: 0 });
+
+  peer.on('open', () => {
+    conn = peer.connect(roomId, { reliable: false });
+    conn.on('open', () => {
+      document.getElementById('connecting-status').textContent = '✅ Подключено! Ждём старт...';
+    });
+    conn.on('data', handleClientReceive);
+    conn.on('close', () => {
+      if (state && state.mode === 'play') showConnectionLost();
+    });
+    conn.on('error', () => {
+      document.getElementById('connecting-status').textContent = '❌ Ошибка соединения';
+    });
+  });
+
+  peer.on('error', (err) => {
+    document.getElementById('connecting-status').textContent = '❌ ' + err.type + ' — проверьте ID';
+  });
+
+  setTimeout(() => {
+    if (!conn || !conn.open) {
+      if (peer) peer.destroy();
+      document.getElementById('connecting-status').textContent = '❌ Не удалось подключиться';
+    }
+  }, 15000);
+}
+
+function startNetworkGame() {
+  // Хост отправляет старт
+  if (isHost && conn && conn.open) {
+    conn.send({
+      type: 'start',
+      difficulty: hostDifficulty,
+      deck: DEFAULT_DECK
+    });
+    state.mode = 'play';
+    state.paused = false;
+    showScreen(null);
+    lastT = 0;
+    gameLoop();
+  }
+}
+
+function handleHostReceive(data) {
+  if (!isHost) return;
+  if (data.type === 'action') {
+    applyClientAction(data.payload);
+  }
+}
+
+function handleClientReceive(data) {
+  if (isHost) return;
+  if (data.type === 'start') {
+    state = createGame(data.difficulty);
+    state.players[0].deck = [...data.deck];
+    state.players[1].deck = [...data.deck];
+    state.mode = 'play';
+    state.paused = false;
+    showScreen(null);
+    lastT = 0;
+    gameLoop();
+  }
+  if (data.type === 'snapshot') {
+    applySnapshot(data.s);
+    lastSnapshotRecv = performance.now();
+  }
+  if (data.type === 'gameover') {
+    state.mode = 'gameover';
+    showGameOver(data.stats);
+  }
+}
+
+function applyClientAction(action) {
+  if (!isHost || !state) return;
+  const p2 = state.players[1];
+  if (action.type === 'place') {
+    tryPlace(p2, action.col, action.row, action.cardIdx);
+  }
+  if (action.type === 'collectSun') {
+    const idx = state.suns.findIndex(s => s.id === action.sunId);
+    if (idx >= 0 && state.suns[idx]) {
+      p2.sun += SUN_VALUE;
+      spawnParticles(state.suns[idx].x, state.suns[idx].y, '#ffeb3b', 10);
+      state.suns.splice(idx, 1);
+    }
+  }
+  if (action.type === 'selectCard') {
+    const key = p2.deck[action.idx];
+    const data = PLANTS[key];
+    if (!data) return;
+    const cd = p2.cooldowns[key] || 0;
+    if (p2.sun >= data.cost && cd <= state.gameTime) {
+      p2.selectedCard = (p2.selectedCard === action.idx) ? -1 : action.idx;
+    }
+  }
+  if (action.type === 'deselect') {
+    p2.selectedCard = -1;
+  }
+}
+
+function buildSnapshot() {
+  return {
+    w: state.wave,
+    wt: Math.round(state.waveTimer),
+    pt: Math.round(state.prepTimer),
+    t: Math.round(state.gameTime),
+    wi: state.waveIntervalCur,
+    z: state.zombies.map(z => [
+      z.type, z.row, Math.round(z.x), Math.round(z.hp), Math.round(z.maxHp),
+      Math.round(z.slowUntil), Math.round(z.stunUntil), Math.round(z.anim)
+    ]),
+    p: state.plants.map(p => [
+      p.type, p.row, p.col, Math.round(p.hp), Math.round(p.maxHp),
+      p.owner, Math.round(p.anim)
+    ]),
+    b: state.bullets.map(b => [Math.round(b.x), Math.round(b.y), b.row, b.slow ? 1 : 0]),
+    s: state.suns.map(s => [s.id, Math.round(s.x), Math.round(s.y)]),
+    u: [state.players[0].sun, state.players[1].sun],
+    k: [state.players[0].kills, state.players[1].kills],
+    cd0: state.players[0].cooldowns,
+    cd1: state.players[1].cooldowns,
+    wtot: state.waveTotal,
+    wsp: state.waveSpawned
+  };
+}
+
+function applySnapshot(s) {
+  if (!state) return;
+  state.wave = s.w;
+  state.waveTimer = s.wt;
+  state.prepTimer = s.pt;
+  state.gameTime = s.t;
+  state.waveIntervalCur = s.wi;
+  state.waveTotal = s.wtot;
+  state.waveSpawned = s.wsp;
+
+  state.zombies = s.z.map(([type, row, x, hp, mhp, su, stu, anim]) => {
+    const data = ZOMBIES[type];
+    return {
+      type, row, x,
+      y: GY + row * CH + CH/2,
+      hp, maxHp: mhp,
+      slowUntil: su, stunUntil: stu,
+      anim, hitFlash: 0, dead: false,
+      color: data.color, icon: data.icon, helmet: data.helmet,
+      huge: data.huge, boss: data.boss, small: data.small,
+      shielded: data.shielded, healer: data.healer,
+      summoner: data.summoner, exploder: data.exploder,
+      splitter: data.splitter, trueBoss: data.trueBoss
+    };
+  });
+
+  state.plants = s.p.map(([type, row, col, hp, mhp, owner, anim]) => ({
+    type, row, col, hp, maxHp: mhp, owner, anim,
+    data: PLANTS[type],
+    x: GX + col * CW + CW/2,
+    y: GY + row * CH + CH/2,
+    ability: PLANTS[type].ability
+  }));
+
+  state.bullets = s.b.map(([x, y, row, slow]) => ({
+    x, y, row, slow: !!slow
+  }));
+
+  state.suns = s.s.map(([id, x, y]) => ({
+    id, x, y, targetY: y, vy: 0, life: 10000, rot: 0
+  }));
+
+  state.players[0].sun = s.u[0];
+  state.players[1].sun = s.u[1];
+  state.players[0].kills = s.k[0];
+  state.players[1].kills = s.k[1];
+  state.players[0].cooldowns = s.cd0;
+  state.players[1].cooldowns = s.cd1;
+}
+
+function showConnectionLost() {
+  if (state) state.mode = 'disconnected';
+  setTimeout(() => {
+    alert('⚠️ Соединение потеряно с хостом');
+    backToMenu();
+  }, 100);
+}
+
+function showGameOver(stats) {
+  showScreen('gameover');
+  document.getElementById('gameover-stats').innerHTML =
+    `Волн: ${stats.wave}<br>P1 убил: ${stats.k1}<br>P2 убил: ${stats.k2}`;
+}
+
+function copyRoomId() {
+  const id = document.getElementById('room-id-display').textContent;
+  navigator.clipboard.writeText(id).then(() => {
+    const btn = event.target;
+    const old = btn.textContent;
+    btn.textContent = '✅ Скопировано!';
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  });
+}
+
+function backToMenu() {
+  if (peer) { peer.destroy(); peer = null; }
+  conn = null;
+  state = null;
+  networkMode = null;
+  isHost = false;
+  showScreen('main');
+}
+
+// ==================== CREATE GAME ====================
+function createGame(diff) {
+  const d = DIFFICULTIES[diff];
+  return {
+    mode: 'play', paused: false,
+    difficulty: diff, difficultyName: d.name,
+    hpMul: d.hpMul, speedMul: d.speedMul,
+    waveInterval: d.waveInterval, spawnMul: d.spawnMul,
+    sunRate: d.sunRate,
+    gameTime: 0, wave: 0, waveTimer: 0, waveIntervalCur: d.waveInterval,
+    waveTotal: 0, waveSpawned: 0,
+    prepTimer: PREP_TIME,
+    lastSunDrop: 0,
+    plants: [], zombies: [], bullets: [], suns: [], particles: [],
+    delayedBullets: [],
+    spawnQueue: [],
+    screenShake: 0,
+    mouse: {x:0, y:0},
+    players: [
+      { id:1, name:'P1', color:'#4caf50', sun:d.startSun,
+        rowStart:0, rowEnd:2, selectedCard:-1,
+        cooldowns:{}, deck:[...DEFAULT_DECK], kills:0 },
+      { id:2, name:'P2', color:'#2196f3', sun:d.startSun,
+        rowStart:3, rowEnd:5, selectedCard:-1,
+        cooldowns:{}, deck:[...DEFAULT_DECK], kills:0 }
+    ]
+  };
+}
+
+// ==================== LOOP ====================
+let lastT = 0;
+let isLooping = false;
+function gameLoop() {
+  if (isLooping) return;
+  isLooping = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function loop(t) {
+  const dt = Math.min(t - lastT, 50);
+  lastT = t;
+
+  if (!state) { isLooping = false; return; }
+
+  if (state.mode === 'play' && !state.paused) {
+    if (isHost) {
+      update(dt);
+      if (t - lastSnapshotSent > SNAPSHOT_INTERVAL && conn && conn.open) {
+        try { conn.send({ type: 'snapshot', s: buildSnapshot() }); } catch(e) {}
+        lastSnapshotSent = t;
+      }
+    }
+  }
+
+  if (state.mode === 'play' || state.mode === 'disconnected') {
+    render();
+  }
+
+  if (state) requestAnimationFrame(loop);
+  else isLooping = false;
+}
+
+// ==================== UPDATE (host only) ====================
+function update(dt) {
+  state.gameTime += dt;
+  if (state.screenShake > 0) state.screenShake -= dt;
+
+  if (state.prepTimer > 0) {
+    state.prepTimer -= dt;
+    if (state.prepTimer <= 0) { state.prepTimer = 0; state.waveTimer = 2000; }
+  }
+
+  if (state.gameTime - state.lastSunDrop > state.sunRate) {
+    state.lastSunDrop = state.gameTime;
+    spawnSkySun();
+  }
+
+  if (state.prepTimer <= 0) {
+    state.waveTimer -= dt;
+    if (state.waveTimer <= 0 && state.spawnQueue.length === 0 && state.zombies.length === 0) {
+      startWave();
+    }
+  }
+
+  if (state.spawnQueue.length > 0) {
+    state.spawnQueue[0].timer -= dt;
+    while (state.spawnQueue.length > 0 && state.spawnQueue[0].timer <= 0) {
+      const s = state.spawnQueue.shift();
+      spawnZombie(s.type, s.row);
+      if (state.spawnQueue.length > 0) state.spawnQueue[0].timer -= Math.max(0, s.timer);
+    }
+  }
+
+  for (let i = state.suns.length - 1; i >= 0; i--) {
+    const s = state.suns[i];
+    if (s.vy) { s.y += s.vy * dt / 16; s.vy += 0.02 * dt / 16; if (s.y > s.targetY) { s.y = s.targetY; s.vy = 0; } }
+    s.life -= dt; s.rot += dt * 0.002;
+    if (s.life <= 0) state.suns.splice(i, 1);
+  }
+
+  for (let i = state.delayedBullets.length - 1; i >= 0; i--) {
+    const b = state.delayedBullets[i];
+    b.delay -= dt;
+    if (b.delay <= 0) { state.bullets.push(b); state.delayedBullets.splice(i, 1); }
+  }
+
+  for (let i = state.plants.length - 1; i >= 0; i--) {
+    const p = state.plants[i];
+    p.anim += dt;
+    if (p.ability === 'sun' && p.anim > 7000) { p.anim = 0; spawnPlantSun(p); }
+    if (p.ability === 'shoot' && p.anim > p.data.rate) { p.anim = 0; fireFromPlant(p); }
+    if (p.ability === 'bomb') { p.fuse -= dt; if (p.fuse <= 0) { explodeBomb(p); state.plants.splice(i, 1); continue; } }
+    if (p.ability === 'line') {
+      p.fuse -= dt;
+      if (p.fuse <= 0) {
+        state.zombies.forEach(z => { if (z.row === p.row && z.x > p.x - 50) { z.hp -= p.data.damage; if (z.hp <= 0) { z.dead = true; state.players[p.owner].kills++; } } });
+        state.screenShake = 200;
+        spawnParticles(p.x, p.y, '#f44336', 30);
+        state.plants.splice(i, 1); continue;
+      }
+    }
+    if (p.ability === 'freeze1') {
+      p.fuse -= dt;
+      if (p.fuse <= 0) {
+        const t = state.zombies.find(z => !z.dead && z.row === p.row && z.x > p.x && z.x - p.x < 100);
+        if (t) t.stunUntil = state.gameTime + (p.data.stunTime || 5000);
+        spawnParticles(p.x, p.y, '#b3e5fc', 20);
+        state.plants.splice(i, 1); continue;
+      }
+    }
+    if (p.ability === 'chomp') {
+      const t = state.zombies.find(z => !z.dead && z.row === p.row && z.x > p.x && z.x - p.x < 70);
+      if (t && p.chewTimer <= 0) {
+        t.hp -= p.data.damage;
+        if (t.hp <= 0) { t.dead = true; state.players[p.owner].kills++; }
+        p.chewTimer = 8000;
+      }
+      if (p.chewTimer > 0) p.chewTimer -= dt;
+    }
+    if (p.ability === 'magnet' && p.anim > 10000) {
+      p.anim = 0;
+      state.zombies.forEach(z => {
+        if (Math.abs(z.x - p.x) < 250 && z.row === p.row && z.helmet) {
+          z.helmet = null; z.hp = Math.min(z.hp, z.maxHp * 0.5);
+        }
+      });
+    }
+    if (p.ability === 'heal' && p.anim > 4000) {
+      p.anim = 0;
+      state.plants.forEach(p2 => {
+        if (p2 !== p && Math.hypot(p2.x - p.x, p2.y - p.y) < 150)
+          p2.hp = Math.min(p2.maxHp, p2.hp + (p.data.healAmount || 100));
+      });
+    }
+    if (p.ability === 'push' && p.anim > 5000) {
+      p.anim = 0;
+      const t = state.zombies.find(z => !z.dead && z.row === p.row && z.x > p.x && z.x - p.x < 100);
+      if (t) t.x += (p.data.pushDist || 200);
+    }
+    if (p.hp <= 0) {
+      spawnParticles(p.x, p.y, '#888', 12);
+      if (p.data.explodeOnDeath) {
+        state.zombies.forEach(z => {
+          if (Math.abs(z.row - p.row) <= 1 && Math.abs(z.x - p.x) < 100) {
+            z.hp -= p.data.damage || 1500;
+            if (z.hp <= 0) { z.dead = true; state.players[p.owner].kills++; }
+          }
+        });
+      }
+      state.plants.splice(i, 1);
+    }
+  }
+
+  for (let i = state.bullets.length - 1; i >= 0; i--) {
+    const b = state.bullets[i];
+    b.x += b.speed * dt / 16;
+    if (b.range && b.x > b.originX + b.range) { state.bullets.splice(i, 1); continue; }
+    if (b.x > W + 300) { state.bullets.splice(i, 1); continue; }
+    for (const z of state.zombies) {
+      if (z.dead || (b.hitList && b.hitList.includes(z))) continue;
+      if (z.row === b.row && Math.abs(z.x - b.x) < 35 && b.x < z.x + 30) {
+        applyDamage(z, b, b.owner);
+        if (!b.pierce) state.bullets.splice(i, 1);
+        else { b.hitList = b.hitList || []; b.hitList.push(z); }
+        break;
+      }
+    }
+  }
+
+  for (let i = state.zombies.length - 1; i >= 0; i--) {
+    const z = state.zombies[i];
+    if (z.dead) { state.zombies.splice(i, 1); continue; }
+    if (z.hitFlash > 0) z.hitFlash -= dt;
+    if (z.trueBoss) z.hp = Math.min(z.maxHp, z.hp + 15 * dt / 1000);
+    if (z.healer) {
+      if (!z.healTimer) z.healTimer = 3000;
+      z.healTimer -= dt;
+      if (z.healTimer <= 0) {
+        z.healTimer = 3000;
+        state.zombies.forEach(z2 => {
+          if (z2 !== z && !z2.dead && Math.hypot(z2.x - z.x, z2.y - z.y) < 150)
+            z2.hp = Math.min(z2.maxHp, z2.hp + 40);
+        });
+      }
+    }
+    if (z.summoner) {
+      if (!z.summonTimer) z.summonTimer = z.trueBoss ? 4000 : 8000;
+      z.summonTimer -= dt;
+      if (z.summonTimer <= 0) { z.summonTimer = z.trueBoss ? 4000 : 8000; spawnZombie('imp', z.row); }
+    }
+    const frozen = z.stunUntil > state.gameTime;
+    const slowed = z.slowUntil > state.gameTime;
+    let spd = frozen ? 0 : z.speed * (slowed ? 0.4 : 1);
+    let attacking = false;
+    for (const p of state.plants) {
+      if (p.row === z.row && Math.abs(p.x - z.x) < 50 && z.x > p.x) {
+        p.hp -= z.damage * dt / 1000;
+        if (p.data.thorns || p.ability === 'thorns') {
+          z.hp -= (p.data.thorns || 40) * dt / 1000;
+          if (z.hp <= 0) { z.dead = true; state.players[p.owner].kills++; }
+        }
+        attacking = true; break;
+      }
+    }
+    if (!attacking && spd > 0) z.x -= spd * dt / 16;
+    z.anim += dt;
+    if (z.x < GX - 30) { triggerGameOver(); return; }
+  }
+
+  for (let i = state.particles.length - 1; i >= 0; i--) {
+    const p = state.particles[i];
+    p.x += p.vx * dt / 16; p.y += p.vy * dt / 16; p.vy += 0.2; p.life -= dt;
+    if (p.life <= 0) state.particles.splice(i, 1);
+  }
+}
+
+function triggerGameOver() {
+  state.mode = 'gameover';
+  if (isHost && conn && conn.open) {
+    conn.send({
+      type: 'gameover',
+      stats: {
+        wave: state.wave,
+        k1: state.players[0].kills,
+        k2: state.players[1].kills
+      }
+    });
+    setTimeout(() => {
+      showGameOver({ wave: state.wave, k1: state.players[0].kills, k2: state.players[1].kills });
+    }, 300);
+  } else if (!isHost) {
+    showGameOver({ wave: state.wave, k1: state.players[0].kills, k2: state.players[1].kills });
+  }
+}
+
+// ==================== ACTIONS ====================
+function tryPlace(player, col, row, cardIdx) {
+  if (col < 0 || col >= COLS) return false;
+  if (row < player.rowStart || row > player.rowEnd) return false;
+  const idx = cardIdx !== undefined ? cardIdx : player.selectedCard;
+  if (idx < 0 || idx >= player.deck.length) return false;
+  if (state.plants.some(p => p.col === col && p.row === row)) return false;
+  const key = player.deck[idx];
+  const data = PLANTS[key];
+  if (!data) return false;
+  if (player.sun < data.cost) return false;
+  const cd = player.cooldowns[key] || 0;
+  if (cd > state.gameTime) return false;
+  player.sun -= data.cost;
+  player.cooldowns[key] = state.gameTime + data.cooldown;
+  state.plants.push({
+    type: key, data, col, row,
+    owner: player.id - 1,
+    x: GX + col * CW + CW/2,
+    y: GY + row * CH + CH/2,
+    hp: data.hp, maxHp: data.hp,
+    anim: 0, ability: data.ability,
+    fuse: (data.ability === 'bomb' || data.ability === 'line' || data.ability === 'freeze1') ? 1200 : 0,
+    chewTimer: 0
+  });
+  spawnParticles(GX + col * CW + CW/2, GY + row * CH + CH/2, player.color, 8);
+  return true;
+}
+
+function fireFromPlant(p) {
+  const rows = [];
+  if (p.data.triple) {
+    rows.push(p.row);
+    if (p.row > 0) rows.push(p.row - 1);
+    if (p.row < ROWS - 1) rows.push(p.row + 1);
+  } else if (p.data.fiveway) {
+    rows.push(p.row);
+    if (p.row > 0) rows.push(p.row - 1);
+    if (p.row < ROWS - 1) rows.push(p.row + 1);
+    if (p.row > 1) rows.push(p.row - 2);
+    if (p.row < ROWS - 2) rows.push(p.row + 2);
+  } else rows.push(p.row);
+  const hasTarget = state.zombies.some(z => !z.dead && z.x > p.x && rows.includes(z.row));
+  if (!hasTarget && !p.data.fiveway) return;
+  const boosted = state.plants.some(t => t.ability === 'boost' && t.row === p.row && t.col === p.col - 1);
+  let buffMul = 1;
+  state.plants.forEach(t => {
+    if (t.ability === 'buff' && t !== p && Math.abs(t.x - p.x) < CW * 1.5 && Math.abs(t.y - p.y) < CH * 1.5)
+      buffMul *= (t.data.buffAmount || 1.5);
+  });
+  const mk = (r) => ({
+    x: p.x + 30, y: GY + r * CH + CH/2, row: r,
+    speed: 8, damage: (p.data.damage || 20) * buffMul * (boosted ? 2 : 1),
+    originX: p.x + 30, range: p.data.range || 99999,
+    slow: p.data.slow, pierce: p.data.pierce, splash: p.data.splash,
+    chain: p.data.chain, boosted, hitList: [], owner: p.owner
+  });
+  rows.forEach(r => {
+    state.bullets.push(mk(r));
+    if (p.data.double) state.delayedBullets.push({ ...mk(r), delay: 150, hitList: [] });
+  });
+}
+
+function explodeBomb(p) {
+  state.screenShake = 300;
+  const rad = p.data.radius || 1;
+  state.zombies.forEach(z => {
+    if (Math.abs(z.row - p.row) <= rad && Math.abs(z.x - p.x) < CW * (rad + 0.5)) {
+      z.hp -= p.data.damage;
+      if (z.hp <= 0 && !z.dead) { z.dead = true; state.players[p.owner].kills++; }
+    }
+  });
+  spawnParticles(p.x, p.y, '#ff5722', 40);
+}
+
+function applyDamage(z, b, owner) {
+  let dmg = b.damage;
+  if (z.shielded && b.x < z.x) dmg *= 0.5;
+  z.hp -= dmg;
+  z.hitFlash = 200;
+  if (b.slow) z.slowUntil = state.gameTime + 3000;
+  if (b.splash) {
+    state.zombies.forEach(z2 => {
+      if (z2 !== z && !z2.dead && Math.abs(z2.row - z.row) <= 1 && Math.abs(z2.x - z.x) < 80) {
+        z2.hp -= dmg * 0.5;
+        if (z2.hp <= 0) { z2.dead = true; if (owner !== undefined) state.players[owner].kills++; }
+      }
+    });
+  }
+  if (b.chain) {
+    state.zombies.filter(z2 => z2 !== z && !z2.dead && Math.abs(z2.x - z.x) < 150)
+      .slice(0, 2).forEach(z2 => { z2.hp -= dmg * 0.7; if (z2.hp <= 0) { z2.dead = true; if (owner !== undefined) state.players[owner].kills++; } });
+  }
+  if (z.hp <= 0 && !z.dead) {
+    z.dead = true;
+    if (owner !== undefined) state.players[owner].kills++;
+    spawnParticles(z.x, z.y, z.color, z.trueBoss ? 50 : 15);
+    if (z.exploder) {
+      state.plants.forEach(p => { if (p.row === z.row && Math.abs(p.x - z.x) < 60) p.hp -= 500; });
+    }
+    if (z.splitter && !z.hasSplit) {
+      for (let k = 0; k < 2; k++) {
+        spawnZombie('imp', z.row);
+        state.zombies[state.zombies.length - 1].x = z.x + (k - 0.5) * 40;
+        state.zombies[state.zombies.length - 1].hasSplit = true;
+      }
+    }
+  }
+}
+
+function startWave() {
+  state.wave++;
+  const wave = state.wave;
+  const pool = getSpawnPool(wave);
+  const count = Math.floor((4 + wave * 1.8) * state.spawnMul);
+  state.waveTotal = count;
+  state.waveSpawned = 0;
+  for (let i = 0; i < count; i++) {
+    const type = pool[Math.floor(Math.random() * pool.length)];
+    const row = Math.floor(Math.random() * ROWS);
+    state.spawnQueue.push({ type, row, timer: i * 450 + Math.random() * 600 });
+  }
+  if (state.spawnQueue.length > 0) state.spawnQueue[0].timer += 1500;
+  let interval = state.waveInterval;
+  if (wave >= 5) interval *= Math.max(0.3, 1 - (wave - 4) * 0.06);
+  state.waveIntervalCur = Math.max(3000, interval);
+  state.waveTimer = state.waveIntervalCur;
+}
+
+function getSpawnPool(wave) {
+  const maxTier = wave < 2 ? 1 : wave < 5 ? 2 : wave < 9 ? 3 : 4;
+  const pool = [];
+  for (const key in ZOMBIES) {
+    const z = ZOMBIES[key];
+    if (z.tier <= maxTier && !z.boss && !z.trueBoss) pool.push(key);
+  }
+  if (wave >= 10 && wave % 10 === 0) pool.push('zomboss');
+  if (wave >= 20 && wave % 15 === 0) pool.push('megaboss', 'fireboss');
+  if (wave === FINAL_BOSS_WAVE) { pool.length = 0; pool.push('apocalypse'); }
+  return pool;
+}
+
+function spawnZombie(type, row) {
+  const data = ZOMBIES[type];
+  if (!data) return;
+  state.zombies.push({
+    type, row,
+    x: W + 30 + Math.random() * 60,
+    y: GY + row * CH + CH/2,
+    hp: data.hp * state.hpMul, maxHp: data.hp * state.hpMul,
+    speed: data.speed * state.speedMul, damage: data.damage,
+    color: data.color, icon: data.icon, helmet: data.helmet,
+    slowUntil: 0, stunUntil: 0, hitFlash: 0, anim: 0, dead: false,
+    huge: data.huge, boss: data.boss, small: data.small,
+    shielded: data.shielded, healer: data.healer, summoner: data.summoner,
+    exploder: data.exploder, splitter: data.splitter, trueBoss: data.trueBoss,
+    hasSplit: false
+  });
+  state.waveSpawned++;
+  if (data.trueBoss) state.screenShake = 800;
+}
+
+function spawnSkySun() {
+  state.suns.push({
+    id: nextSunId++,
+    x: GX + Math.random() * (COLS * CW - 40) + 20,
+    y: -30,
+    targetY: GY + Math.random() * (ROWS * CH - 40) + 20,
+    vy: 1, life: 12000, rot: 0
+  });
+}
+
+function spawnPlantSun(p) {
+  state.suns.push({
+    id: nextSunId++,
+    x: p.x, y: p.y, targetY: p.y + 30,
+    vy: 0.5, life: 10000, rot: 0
+  });
+}
+
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    state.particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 6,
+      vy: (Math.random() - 0.5) * 6 - 2,
+      color, life: 500 + Math.random() * 500,
+      size: 2 + Math.random() * 4
+    });
+  }
+}
+
+// ==================== RENDER ====================
+function render() {
+  ctx.save();
+  if (state.screenShake > 0) ctx.translate((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10);
+
+  ctx.fillStyle = '#3a7d2c';
+  ctx.fillRect(0, 0, W, H);
+
+  // Field
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const x = GX + c * CW, y = GY + r * CH;
+      ctx.fillStyle = (r + c) % 2 === 0 ? '#4caf50' : '#43a047';
+      ctx.fillRect(x, y, CW, CH);
+      if (r >= 3) {
+        ctx.fillStyle = 'rgba(33,150,243,0.15)';
+        ctx.fillRect(x, y, CW, CH);
+      }
+      ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+      ctx.strokeRect(x, y, CW, CH);
+    }
+  }
+
+  // Divider
+  ctx.strokeStyle = 'rgba(255,235,59,0.6)';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([10, 6]);
+  ctx.beginPath();
+  ctx.moveTo(GX, GY + 3 * CH);
+  ctx.lineTo(GX + COLS * CW, GY + 3 * CH);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // House
+  ctx.fillStyle = '#5d4037';
+  ctx.fillRect(0, GY, GX - 10, ROWS * CH);
+  ctx.fillStyle = '#8d6e63';
+  ctx.fillRect(0, GY, GX - 20, ROWS * CH);
+  for (let i = 0; i < 6; i++) {
+    ctx.fillStyle = '#6d4c41';
+    ctx.fillRect(20 + (i % 2) * 100, GY + 30 + i * 100, 80, 70);
+  }
+
+  // P1 hover (host only)
+  if (isHost) {
+    const p1 = state.players[0];
+    if (state.mouse.x > GX && state.mouse.x < GX + COLS * CW &&
+        state.mouse.y > GY && state.mouse.y < GY + ROWS * CH) {
+      const c = Math.floor((state.mouse.x - GX) / CW);
+      const r = Math.floor((state.mouse.y - GY) / CH);
+      if (r >= p1.rowStart && r <= p1.rowEnd) {
+        const occupied = state.plants.some(p => p.col === c && p.row === r);
+        if (p1.selectedCard >= 0) {
+          ctx.fillStyle = occupied ? 'rgba(255,0,0,0.35)' : 'rgba(76,175,80,0.4)';
+          ctx.fillRect(GX + c * CW, GY + r * CH, CW, CH);
+          ctx.strokeStyle = p1.color;
+          ctx.lineWidth = 3;
+          ctx.strokeRect(GX + c * CW, GY + r * CH, CW, CH);
+        }
+      }
+    }
+  }
+
+  // P2 hover (client only — we track local mouse)
+  if (!isHost && conn && conn.open) {
+    const p2 = state.players[1];
+    if (state.mouse.x > GX && state.mouse.x < GX + COLS * CW &&
+        state.mouse.y > GY && state.mouse.y < GY + ROWS * CH) {
+      const c = Math.floor((state.mouse.x - GX) / CW);
+      const r = Math.floor((state.mouse.y - GY) / CH);
+      if (r >= p2.rowStart && r <= p2.rowEnd) {
+        const occupied = state.plants.some(p => p.col === c && p.row === r);
+        if (p2.selectedCard >= 0) {
+          ctx.fillStyle = occupied ? 'rgba(255,0,0,0.35)' : 'rgba(33,150,243,0.4)';
+          ctx.fillRect(GX + c * CW, GY + r * CH, CW, CH);
+          ctx.strokeStyle = p2.color;
+          ctx.lineWidth = 3;
+          ctx.strokeRect(GX + c * CW, GY + r * CH, CW, CH);
+        }
+      }
+    }
+  }
+
+  // Draw
+  state.plants.forEach(p => drawPlant(p));
+  state.zombies.forEach(z => drawZombie(z));
+  state.bullets.forEach(b => {
+    ctx.fillStyle = b.slow ? '#81d4fa' : '#7cb342';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  state.suns.forEach(s => drawSun(s));
+  state.particles.forEach(p => {
+    ctx.globalAlpha = Math.max(0, p.life / 1000);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+
+  // UI
+  drawHUD();
+  if (state.prepTimer > 0) drawPrepOverlay();
+  if (state.paused) drawPausedOverlay();
+  if (state.mode === 'disconnected') drawDisconnectOverlay();
+
+  ctx.restore();
+}
+
+function drawPlant(p) {
+  const cx = p.x, cy = p.y;
+  const bob = Math.sin(p.anim * 0.003) * 3;
+  const playerColor = state.players[p.owner].color;
+
+  ctx.strokeStyle = playerColor;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 35, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 25, 28, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#2e7d32';
+  ctx.fillRect(cx - 4, cy - 10 + bob, 8, 32);
+
+  ctx.fillStyle = p.data.color;
+  ctx.beginPath();
+  ctx.arc(cx, cy - 14 + bob, 22, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.font = '26px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(p.data.icon, cx, cy - 14 + bob);
+
+  if (p.hp < p.maxHp) {
+    const w = 50;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(cx - w/2, cy + 25, w, 5);
+    ctx.fillStyle = '#4caf50';
+    ctx.fillRect(cx - w/2, cy + 25, w * (p.hp / p.maxHp), 5);
+  }
+}
+
+function drawZombie(z) {
+  const cx = z.x, cy = z.y;
+  const size = z.huge ? 1.6 : z.small ? 0.7 : 1;
+  const walk = Math.sin(z.anim * 0.008) * 4;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 35 * size, 24 * size, 8 * size, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (z.slowUntil > state.gameTime || z.stunUntil > state.gameTime) {
+    ctx.fillStyle = z.stunUntil > state.gameTime ? 'rgba(255,235,59,0.3)' : 'rgba(129,212,250,0.3)';
+    ctx.beginPath();
+    ctx.arc(cx, cy - 10, 35 * size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (z.trueBoss) {
+    const pulse = 45 + Math.sin(z.anim * 0.005) * 12;
+    ctx.strokeStyle = 'rgba(255,0,0,0.7)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy - 10, pulse * size, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = z.color;
+  ctx.fillRect(cx - 14 * size, cy - 14 * size + walk, 28 * size, 38 * size);
+
+  ctx.beginPath();
+  ctx.arc(cx, cy - 22 * size + walk, 18 * size, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#ff0000';
+  ctx.beginPath();
+  ctx.arc(cx - 6 * size, cy - 25 * size + walk, 3 * size, 0, Math.PI * 2);
+  ctx.arc(cx + 6 * size, cy - 25 * size + walk, 3 * size, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (z.helmet === 'cone') {
+    ctx.fillStyle = '#ff7043';
+    ctx.beginPath();
+    ctx.moveTo(cx - 18 * size, cy - 32 * size + walk);
+    ctx.lineTo(cx + 18 * size, cy - 32 * size + walk);
+    ctx.lineTo(cx, cy - 60 * size + walk);
+    ctx.closePath();
+    ctx.fill();
+  } else if (z.helmet === 'bucket') {
+    ctx.fillStyle = '#9e9e9e';
+    ctx.fillRect(cx - 18 * size, cy - 48 * size + walk, 36 * size, 22 * size);
+  } else if (z.helmet === 'helmet') {
+    ctx.fillStyle = '#1976d2';
+    ctx.beginPath();
+    ctx.arc(cx, cy - 32 * size + walk, 18 * size, Math.PI, 0);
+    ctx.fill();
+  }
+
+  ctx.font = `${20 * size}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.fillText(z.icon, cx, cy - 44 * size + walk);
+
+  if (z.hp < z.maxHp) {
+    const w = 55 * size;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(cx - w/2, cy - 66 * size + walk, w, 6);
+    const pct = z.hp / z.maxHp;
+    ctx.fillStyle = pct > 0.5 ? '#4caf50' : pct > 0.25 ? '#ff9800' : '#f44336';
+    ctx.fillRect(cx - w/2, cy - 66 * size + walk, w * pct, 6);
+  }
+}
+
+function drawSun(s) {
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.rotate(s.rot);
+  ctx.fillStyle = 'rgba(255,235,59,0.6)';
+  for (let i = 0; i < 8; i++) {
+    ctx.save();
+    ctx.rotate(i * Math.PI / 4);
+    ctx.fillRect(-3, -22, 6, 12);
+    ctx.restore();
+  }
+  const grad = ctx.createRadialGradient(0, 0, 2, 0, 0, 16);
+  grad.addColorStop(0, '#fff59d');
+  grad.addColorStop(1, '#fbc02d');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(0, 0, 16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ==================== HUD ====================
+function drawHUD() {
+  const p1 = state.players[0];
+  const p2 = state.players[1];
+  const cardW = 105, cardH = 60;
+
+  // TOP
+  ctx.fillStyle = 'rgba(10,25,10,0.92)';
+  ctx.fillRect(0, 0, W, 145);
+  ctx.strokeStyle = p1.color;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, 145);
+  ctx.lineTo(W, 145);
+  ctx.stroke();
+
+  ctx.fillStyle = '#fbc02d';
+  ctx.beginPath();
+  ctx.arc(40, 45, 26, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px Arial';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(p1.sun, 78, 45);
+
+  ctx.fillStyle = p1.color;
+  ctx.font = 'bold 18px Arial';
+  ctx.fillText('🟢 P1 (Хост) · верхние ряды', 20, 15);
+
+  for (let i = 0; i < 10; i++) {
+    drawCard(p1, i, 150 + i * (cardW + 5), 10, cardW, cardH, true);
+  }
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 16px Arial';
+  ctx.textAlign = 'right';
+  ctx.fillText(`Волна: ${state.wave}`, W - 20, 20);
+  const inField = state.zombies.length;
+  const coming = Math.max(0, state.waveTotal - state.waveSpawned);
+  ctx.fillStyle = '#ff9800';
+  ctx.fillText(`🧟 ${inField}  ⏳ ${coming}`, W - 20, 45);
+
+  // Connection status
+  const online = conn && conn.open;
+  ctx.fillStyle = online ? '#4caf50' : '#f44336';
+  ctx.font = 'bold 14px Arial';
+  ctx.fillText(online ? '🌐 Подключено' : '⚠️ Нет соединения', W - 20, 70);
+
+  const wp = Math.max(0, 1 - state.waveTimer / state.waveIntervalCur);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillRect(W - 220, 85, 200, 8);
+  ctx.fillStyle = '#ff5252';
+  ctx.fillRect(W - 220, 85, 200 * wp, 8);
+
+  ctx.fillStyle = '#7fff00';
+  ctx.font = 'bold 13px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Убито: P1=${p1.kills}  P2=${p2.kills}`, 20, 130);
+
+  // BOTTOM
+  ctx.fillStyle = 'rgba(10,10,25,0.92)';
+  ctx.fillRect(0, H - 145, W, 145);
+  ctx.strokeStyle = p2.color;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, H - 145);
+  ctx.lineTo(W, H - 145);
+  ctx.stroke();
+
+  ctx.fillStyle = '#fbc02d';
+  ctx.beginPath();
+  ctx.arc(40, H - 105, 26, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText(p2.sun, 78, H - 105);
+
+  ctx.fillStyle = p2.color;
+  ctx.font = 'bold 18px Arial';
+  ctx.fillText('🔵 P2 (Клиент) · нижние ряды', 20, H - 135);
+
+  const isP2Local = !isHost && conn && conn.open;
+  for (let i = 0; i < 10; i++) {
+    drawCard(p2, i, 150 + i * (cardW + 5), H - 135, cardW, cardH, isP2Local);
+  }
+
+  ctx.fillStyle = '#aaa';
+  ctx.font = '13px Arial';
+  ctx.textAlign = 'right';
+  if (isHost) {
+    ctx.fillText('Ждём действия P2...', W - 20, H - 15);
+  } else {
+    ctx.fillText('Клик по карте и клетке · клик по солнцу', W - 20, H - 15);
+  }
+}
+
+function drawCard(player, idx, x, y, w, h, isLocalPlayer) {
+  const key = player.deck[idx];
+  const data = PLANTS[key];
+  if (!data) return;
+  const cd = player.cooldowns[key] || 0;
+  const canAfford = player.sun >= data.cost;
+  const onCd = cd > state.gameTime;
+  const isSelected = player.selectedCard === idx;
+  const hovered = isLocalPlayer && state.mouse.x > x && state.mouse.x < x + w &&
+                  state.mouse.y > y && state.mouse.y < y + h;
+
+  ctx.fillStyle = isSelected ? '#ffeb3b' : (canAfford && !onCd ? '#e8f5e9' : '#6b6b6b');
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = isSelected ? player.color : (hovered ? '#ffeb3b' : '#333');
+  ctx.lineWidth = (isSelected || hovered) ? 3 : 1;
+  ctx.strokeRect(x, y, w, h);
+
+  ctx.font = '24px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#000';
+  ctx.fillText(data.icon, x + w/2, y + 22);
+
+  ctx.fillStyle = canAfford && !onCd ? '#000' : '#444';
+  ctx.font = 'bold 13px Arial';
+  ctx.fillText(`☀${data.cost}`, x + w/2, y + 40);
+
+  ctx.font = '9px Arial';
+  ctx.fillStyle = '#555';
+  ctx.fillText(data.name.slice(0, 16), x + w/2, y + 54);
+
+  if (onCd) {
+    const pct = (cd - state.gameTime) / data.cooldown;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x, y, w, h * pct);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px Arial';
+    ctx.fillText(Math.ceil((cd - state.gameTime) / 1000) + 'с', x + w/2, y + h/2);
+  }
+
+  if (hovered) {
+    const desc = DESC[key] || '';
+    const tipW = 260, tipH = 60;
+    const tipX = Math.min(x, W - tipW - 5);
+    const tipY = y < H / 2 ? y + h + 5 : y - tipH - 5;
+    ctx.fillStyle = 'rgba(0,0,0,0.95)';
+    ctx.fillRect(tipX, tipY, tipW, tipH);
+    ctx.strokeStyle = '#7fff00';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tipX, tipY, tipW, tipH);
+    ctx.fillStyle = '#7fff00';
+    ctx.font = 'bold 13px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${data.icon} ${data.name}`, tipX + 8, tipY + 18);
+    ctx.fillStyle = '#fff';
+    ctx.font = '11px Arial';
+    ctx.fillText(desc, tipX + 8, tipY + 36);
+    if (data.damage) {
+      ctx.fillStyle = '#ff5252';
+      ctx.fillText(`💥 Урон: ${data.damage}`, tipX + 8, tipY + 52);
+    } else if (data.hp && data.ability === 'none') {
+      ctx.fillStyle = '#4caf50';
+      ctx.fillText(`❤ HP: ${data.hp}`, tipX + 8, tipY + 52);
+    }
+  }
+}
+
+function drawPrepOverlay() {
+  const secs = Math.ceil(state.prepTimer / 1000);
+  const pulse = 1 + Math.sin(state.gameTime * 0.008) * 0.08;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(0, 145, W, H - 290);
+
+  ctx.font = `bold ${Math.round(110 * pulse)}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(127,255,0,0.95)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.lineWidth = 10;
+  ctx.strokeText(secs, W/2, H/2 - 60);
+  ctx.fillText(secs, W/2, H/2 - 60);
+
+  ctx.font = 'bold 26px Arial';
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+  ctx.lineWidth = 5;
+  ctx.strokeText('🌻 P1 и P2 — расставьте растения! 🌻', W/2, H/2 + 20);
+  ctx.fillText('🌻 P1 и P2 — расставьте растения! 🌻', W/2, H/2 + 20);
+}
+
+function drawPausedOverlay() {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.font = 'bold 100px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffeb3b';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 8;
+  ctx.strokeText('⏸ ПАУЗА', W/2, H/2 - 60);
+  ctx.fillText('⏸ ПАУЗА', W/2, H/2 - 60);
+  ctx.font = 'bold 22px Arial';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('SPACE — продолжить', W/2, H/2 + 40);
+}
+
+function drawDisconnectOverlay() {
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.font = 'bold 56px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ff1744';
+  ctx.fillText('⚠️ СОЕДИНЕНИЕ ПОТЕРЯНО', W/2, H/2);
+}
+
+// ==================== INPUT ====================
+canvas.addEventListener('mousemove', e => {
+  if (!state) return;
+  const rect = canvas.getBoundingClientRect();
+  state.mouse.x = (e.clientX - rect.left) * (W / rect.width);
+  state.mouse.y = (e.clientY - rect.top) * (H / rect.height);
+});
+
+canvas.addEventListener('click', e => {
+  if (!state || state.mode !== 'play' || state.paused) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (W / rect.width);
+  const y = (e.clientY - rect.top) * (H / rect.height);
+
+  const myPlayer = isHost ? state.players[0] : state.players[1];
+  const myPlayerIdx = isHost ? 0 : 1;
+
+  // Card click
+  const cardW = 105, cardH = 60;
+  const cardY = isHost ? 10 : H - 135;
+  for (let i = 0; i < 10; i++) {
+    const cx = 150 + i * (cardW + 5);
+    if (x > cx && x < cx + cardW && y > cardY && y < cardY + cardH) {
+      const key = myPlayer.deck[i];
+      const data = PLANTS[key];
+      const cd = myPlayer.cooldowns[key] || 0;
+      if (myPlayer.sun >= data.cost && cd <= state.gameTime) {
+        if (isHost) {
+          myPlayer.selectedCard = (myPlayer.selectedCard === i) ? -1 : i;
+        } else {
+          if (conn && conn.open) {
+            conn.send({ type: 'action', payload: { type: 'selectCard', idx: i } });
+          }
+        }
+      }
+      return;
+    }
+  }
+
+  // Sun collect
+  for (let i = state.suns.length - 1; i >= 0; i--) {
+    const s = state.suns[i];
+    if (Math.hypot(x - s.x, y - s.y) < 35) {
+      if (isHost) {
+        myPlayer.sun += SUN_VALUE;
+        spawnParticles(s.x, s.y, '#ffeb3b', 10);
+        state.suns.splice(i, 1);
+      } else {
+        if (conn && conn.open) {
+          conn.send({ type: 'action', payload: { type: 'collectSun', sunId: s.id } });
+        }
+      }
+      return;
+    }
+  }
+
+  // Place
+  const col = Math.floor((x - GX) / CW);
+  const row = Math.floor((y - GY) / CH);
+  if (myPlayer.selectedCard >= 0 && col >= 0 && col < COLS && row >= myPlayer.rowStart && row <= myPlayer.rowEnd) {
+    if (isHost) {
+      tryPlace(myPlayer, col, row);
+    } else {
+      if (conn && conn.open) {
+        conn.send({ type: 'action', payload: { type: 'place', col, row, cardIdx: myPlayer.selectedCard } });
+      }
+    }
+  }
+});
+
+canvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (!state) return;
+  if (isHost) {
+    state.players[0].selectedCard = -1;
+  } else {
+    if (conn && conn.open) {
+      conn.send({ type: 'action', payload: { type: 'deselect' } });
+    }
+  }
+});
+
+document.addEventListener('keydown', e => {
+  if (!state || state.mode !== 'play') return;
+  if (e.key === ' ') {
+    state.paused = !state.paused;
+    e.preventDefault();
+  }
+  if (e.key === 'Escape') {
+    if (isHost) state.players[0].selectedCard = -1;
+    else if (conn && conn.open) conn.send({ type: 'action', payload: { type: 'deselect' } });
+  }
+});
+</script>
+</body>
+</html>
